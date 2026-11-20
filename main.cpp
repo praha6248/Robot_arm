@@ -12,6 +12,11 @@
 #include "OrbitalCamera.h"
 #include "RobotArm.h"
 #include "World.h"
+#include "CommandServer.h"
+#include "RobotLanguage.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+#include <cstdlib>
 
 // --- SHADERY ---
 const char *vertexShaderSource = R"(
@@ -164,6 +169,7 @@ std::vector<Part> parts = {
 
 RobotArm robot;
 World world;
+RobotLanguage language(robot, world);
 
 // ---------------------------------------------------------------------------------
 // Proste oznaczenia na podłodze: kontury pól i litery A-F zbudowane z cienkich pasków
@@ -332,6 +338,12 @@ int main()
     glfwSwapInterval(1);
     double lastTime = glfwGetTime();
 
+    // serwer komend języka robota (TCP + konsola)
+    const char *portEnv = std::getenv("ROBOT_PORT");
+    CommandServer server(portEnv ? std::atoi(portEnv) : 5555);
+    server.start(true);
+    std::cout << "Wpisz HELP aby zobaczyc komendy robota." << std::endl;
+
     glEnable(GL_DEPTH_TEST);
 
     while (!glfwWindowShouldClose(win))
@@ -339,6 +351,7 @@ int main()
         double now = glfwGetTime();
         float dt = float(std::min(now - lastTime, 0.05));
         lastTime = now;
+        language.update(server);
         robot.update(dt);
         world.update(dt, robot);
 
@@ -417,6 +430,18 @@ int main()
             glDrawArrays(GL_TRIANGLES, 0, 36);
         }
         glUniform1i(glGetUniformLocation(prog, "solid"), 0);
+
+        // zrzut ekranu na żądanie komendy SCREENSHOT
+        if (!language.pendingScreenshot().empty())
+        {
+            int w, h;
+            glfwGetFramebufferSize(win, &w, &h);
+            std::vector<unsigned char> px(size_t(w) * h * 3);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, px.data());
+            stbi_flip_vertically_on_write(1);
+            language.screenshotDone(stbi_write_png(language.pendingScreenshot().c_str(), w, h, 3, px.data(), w * 3) != 0);
+        }
 
         glfwSwapBuffers(win);
         glfwPollEvents();

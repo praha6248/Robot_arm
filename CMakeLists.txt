@@ -40,6 +40,8 @@ add_executable(robot_arm
     main.cpp
     RobotArm.cpp
     World.cpp
+    CommandServer.cpp
+    RobotLanguage.cpp
     ObjMesh.cpp
     stb_image.cpp
     src/glad.c)
