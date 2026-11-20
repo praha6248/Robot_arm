@@ -6,6 +6,7 @@
 #include <vector>
 #include <sstream>
 #include <unistd.h>
+#include <algorithm>
 #include "stb_image.h"
 #include "ObjMesh.h"
 #include "OrbitalCamera.h"
@@ -156,8 +157,7 @@ std::vector<Part> parts = {
     {"parts/chwytak5_L.obj", "parts/chwytak5_L_texture.png"},
     {"parts/chwytak5_P.obj", "parts/chwytak5_P_texture.png"},
     {"parts/chwytak6_L.obj", "parts/chwytak6_L_texture.png"},
-    {"parts/chwytak6_P.obj", "parts/chwytak6_P_texture.png"},
-    {"parts/kostka.obj", "parts/cube_texture.png"}};
+    {"parts/chwytak6_P.obj", "parts/chwytak6_P_texture.png"}};
 
 RobotArm robot;
 
@@ -223,13 +223,18 @@ int main()
         part.tex = loadTexture(part.texPath.c_str());
     }
 
-    ObjMesh *cubeMesh = new ObjMesh("parts/kostka.obj");
-    GLuint cubeTex = loadTexture("parts/cube_texture.png");
+    glfwSwapInterval(1);
+    double lastTime = glfwGetTime();
 
     glEnable(GL_DEPTH_TEST);
 
     while (!glfwWindowShouldClose(win))
     {
+        double now = glfwGetTime();
+        float dt = float(std::min(now - lastTime, 0.05));
+        lastTime = now;
+        robot.update(dt);
+
         glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -273,25 +278,7 @@ int main()
 
         glfwSwapBuffers(win);
         glfwPollEvents();
-        glm::vec3 chwytak6_P_pos = glm::vec3(transforms[13][3]);
-        glm::vec3 chwytak6_L_pos = glm::vec3(transforms[14][3]);
-        glm::vec3 chwytak1_pos = glm::vec3(transforms[14][3]);
-        glm::vec3 cube_pos = glm::vec3(transforms[15][3]);
-        chwytak1_pos.y = -chwytak1_pos.y;
-
-        float distance = glm::distance(chwytak1_pos, cube_pos);
-        if (!robot.cubeAttached && robot.gripper5 < 0.0f && distance < 5.0f)
-        {
-
-            std::cout << "warunek spełniony" << std::endl;
-            robot.cubeAttached = true;
-        }
-        if (robot.cubeAttached && robot.gripper5 > 0.0f)
-        {
-            robot.cubeAttached = false;
-        }
     }
-    static int frameCounter = 0;
     glDeleteProgram(prog);
     glfwDestroyWindow(win);
     glfwTerminate();
