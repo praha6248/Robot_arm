@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build & headless tests (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++, clang++]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libglfw3-dev libglm-dev libgl-dev
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} -DROBOT_BUILD_TESTS=ON
+      - name: Build (simulator + tests)
+        run: cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
