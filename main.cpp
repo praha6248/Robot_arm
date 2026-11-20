@@ -1,13 +1,11 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <unistd.h>
 #include "stb_image.h"
 #include "ObjMesh.h"
 #include "OrbitalCamera.h"
@@ -112,57 +110,6 @@ GLuint compileShader(GLenum type, const char *src)
     return s;
 }
 
-struct MeshData
-{
-    std::vector<float> vertices;
-    std::vector<unsigned int> indices;
-};
-
-MeshData loadObj(const char *path)
-{
-    MeshData data;
-    Assimp::Importer importer;
-    const aiScene *scene = importer.ReadFile(path, aiProcess_Triangulate | aiProcess_JoinIdenticalVertices);
-    if (!scene || !scene->HasMeshes())
-    {
-        std::cerr << "ASSIMP: " << importer.GetErrorString() << std::endl;
-        return data;
-    }
-    aiMesh *mesh = scene->mMeshes[0];
-    for (unsigned i = 0; i < mesh->mNumVertices; ++i)
-    {
-        data.vertices.push_back(mesh->mVertices[i].x);
-        data.vertices.push_back(mesh->mVertices[i].y);
-        data.vertices.push_back(mesh->mVertices[i].z);
-        if (mesh->HasTextureCoords(0))
-        {
-            data.vertices.push_back(mesh->mTextureCoords[0][i].x);
-            data.vertices.push_back(mesh->mTextureCoords[0][i].y);
-        }
-        else
-        {
-            data.vertices.push_back(0.0f);
-            data.vertices.push_back(0.0f);
-        }
-        if (mesh->HasNormals())
-        {
-            data.vertices.push_back(mesh->mNormals[i].x);
-            data.vertices.push_back(mesh->mNormals[i].y);
-            data.vertices.push_back(mesh->mNormals[i].z);
-        }
-        else
-        {
-            data.vertices.push_back(0.0f);
-            data.vertices.push_back(0.0f);
-            data.vertices.push_back(1.0f);
-        }
-    }
-    for (unsigned i = 0; i < mesh->mNumFaces; ++i)
-        for (unsigned j = 0; j < mesh->mFaces[i].mNumIndices; ++j)
-            data.indices.push_back(mesh->mFaces[i].mIndices[j]);
-    return data;
-}
-
 GLuint loadTexture(const char *filename)
 {
     stbi_set_flip_vertically_on_load(true);
@@ -222,6 +169,9 @@ void key_callback(GLFWwindow *window, int key, int scancode, int action, int mod
 
 int main()
 {
+#ifdef ROBOT_ASSET_DIR
+    if (chdir(ROBOT_ASSET_DIR) != 0) std::cerr << "Nie mogę wejść do " << ROBOT_ASSET_DIR << std::endl;
+#endif
     if (!glfwInit())
         return -1;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
