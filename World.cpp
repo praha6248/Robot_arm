@@ -133,8 +133,8 @@ void World::update(float dt, RobotArm& robot) {
                 std::cout << "[world] nie da sie chwycic '" << b.name << "' - cos na nim lezy" << std::endl;
                 break;
             }
+            b.heldLocal = glm::inverse(robot.toolFrame()) * blockMatrix(int(i), robot);  // przed zmianą stanu!
             b.state = Block::HELD;
-            b.heldLocal = glm::inverse(robot.toolFrame()) * blockMatrix(int(i), robot);
             held = int(i);
             robot.fingerStop = contact;          // palce opierają się o klocek
             robot.gripper5 = std::max(robot.gripper5, contact);
