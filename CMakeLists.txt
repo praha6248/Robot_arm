@@ -39,6 +39,7 @@ find_package(Threads REQUIRED)
 add_executable(robot_arm
     main.cpp
     RobotArm.cpp
+    World.cpp
     ObjMesh.cpp
     stb_image.cpp
     src/glad.c)

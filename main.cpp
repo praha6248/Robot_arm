@@ -11,6 +11,7 @@
 #include "ObjMesh.h"
 #include "OrbitalCamera.h"
 #include "RobotArm.h"
+#include "World.h"
 
 // --- SHADERY ---
 const char *vertexShaderSource = R"(
@@ -35,6 +36,8 @@ const char *fragmentShaderSource = R"(
 in vec2 TexCoord;
 out vec4 FragColor;
 uniform sampler2D tex;
+uniform int solid = 0;          // 1 = jednolity kolor zamiast tekstury
+uniform vec3 color = vec3(1.0);
 in vec3 FragPos;
 in vec3 Normal;
 
@@ -45,7 +48,7 @@ void main() {
     vec3 norm = normalize(Normal);
     float diff = max(dot(norm, -lightDir), 0.0);
     vec3 diffuse = diff * lightColor;
-    vec3 texColor = texture(tex, TexCoord).rgb;
+    vec3 texColor = solid == 1 ? color : texture(tex, TexCoord).rgb;
     FragColor = vec4(texColor * (0.4 + 0.6 * diffuse), 1.0);
 }
 )";
@@ -160,10 +163,106 @@ std::vector<Part> parts = {
     {"parts/chwytak6_P.obj", "parts/chwytak6_P_texture.png"}};
 
 RobotArm robot;
+World world;
+
+// ---------------------------------------------------------------------------------
+// Proste oznaczenia na podłodze: kontury pól i litery A-F zbudowane z cienkich pasków
+// ---------------------------------------------------------------------------------
+struct FloorMarks {
+    GLuint vao = 0, vbo = 0;
+    struct Range { GLint first; GLsizei count; };
+    Range outline{0, 0};
+    std::vector<Range> letters;  // A..F
+};
+FloorMarks marks;
+
+static void addSegment(std::vector<float> &v, glm::vec2 a, glm::vec2 b, float w)
+{
+    glm::vec2 d = glm::normalize(b - a), n(-d.y, d.x);
+    a -= d * (w * 0.5f); b += d * (w * 0.5f);
+    glm::vec2 q[4] = {a + n * (w * 0.5f), a - n * (w * 0.5f), b - n * (w * 0.5f), b + n * (w * 0.5f)};
+    int idx[6] = {0, 1, 2, 2, 3, 0};
+    for (int i : idx)
+        v.insert(v.end(), {q[i].x, 0.0f, q[i].y, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f});
+}
+
+// sześcian o boku 1 ze środkiem w (0,0,0) - klocki
+static GLuint buildCube()
+{
+    std::vector<float> v;
+    const glm::vec3 n[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    for (const glm::vec3 &N : n)
+    {
+        glm::vec3 u = std::abs(N.y) > 0.5f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
+        glm::vec3 w = glm::cross(N, u);
+        glm::vec3 c[4] = {0.5f * (N - u - w), 0.5f * (N + u - w), 0.5f * (N + u + w), 0.5f * (N - u + w)};
+        for (int i : {0, 1, 2, 2, 3, 0})
+            v.insert(v.end(), {c[i].x, c[i].y, c[i].z, 0.0f, 0.0f, N.x, N.y, N.z});
+    }
+    GLuint vao, vbo;
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, v.size() * sizeof(float), v.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(5 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+    return vao;
+}
+
+static void buildFloorMarks()
+{
+    std::vector<float> v;
+    // kontur pola (współrzędne lokalne, x/z)
+    float h = World::BLOCK_SIZE * 0.5f + 0.25f;
+    glm::vec2 c[4] = {{-h, -h}, {h, -h}, {h, h}, {-h, h}};
+    for (int i = 0; i < 4; ++i) addSegment(v, c[i], c[(i + 1) % 4], 0.08f);
+    marks.outline = {0, GLsizei(v.size() / 8)};
+    // litery w ramce [0,1]x[0,1] (x w prawo, y w górę)
+    std::vector<std::vector<glm::vec4>> font = {
+        {{0, 0, .5f, 1}, {.5f, 1, 1, 0}, {.25f, .5f, .75f, .5f}},                                                   // A
+        {{0, 0, 0, 1}, {0, 1, .7f, 1}, {.7f, 1, .9f, .75f}, {.9f, .75f, .7f, .5f}, {0, .5f, .7f, .5f},
+         {.7f, .5f, 1, .25f}, {1, .25f, .75f, 0}, {.75f, 0, 0, 0}},                                                  // B
+        {{1, 1, 0, 1}, {0, 1, 0, 0}, {0, 0, 1, 0}},                                                                   // C
+        {{0, 0, 0, 1}, {0, 1, .6f, 1}, {.6f, 1, 1, .6f}, {1, .6f, 1, .4f}, {1, .4f, .6f, 0}, {.6f, 0, 0, 0}},        // D
+        {{0, 0, 0, 1}, {0, 1, 1, 1}, {0, .5f, .7f, .5f}, {0, 0, 1, 0}},                                              // E
+        {{0, 0, 0, 1}, {0, 1, 1, 1}, {0, .5f, .7f, .5f}},                                                             // F
+    };
+    for (auto &letter : font) {
+        GLint first = GLint(v.size() / 8);
+        // litera czytelna z domyślnej kamery: "góra" litery = -z
+        auto map = [](float x, float y) { return glm::vec2((x - 0.5f) * 0.6f, -(y - 0.5f) * 0.8f); };
+        for (auto &s : letter) addSegment(v, map(s.x, s.y), map(s.z, s.w), 0.09f);
+        marks.letters.push_back({first, GLsizei(v.size() / 8) - first});
+    }
+    glGenVertexArrays(1, &marks.vao);
+    glGenBuffers(1, &marks.vbo);
+    glBindVertexArray(marks.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, marks.vbo);
+    glBufferData(GL_ARRAY_BUFFER, v.size() * sizeof(float), v.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void *)(5 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+}
 
 void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
 
+    if (key == GLFW_KEY_K && action == GLFW_PRESS)
+    {
+        robot.clearMotion();
+        world.reset(robot);
+        std::cout << "Scena zresetowana" << std::endl;
+    }
     robot.handleKey(key, action);
 }
 
@@ -223,6 +322,13 @@ int main()
         part.tex = loadTexture(part.texPath.c_str());
     }
 
+    GLuint cubeVAO = buildCube();
+    const glm::mat4 cubeLocal = glm::scale(glm::mat4(1.0f), glm::vec3(World::BLOCK_SIZE));
+    buildFloorMarks();
+    world.reset(robot);
+    camera.distance = 40.0f;
+    camera.pitch = 0.55f;
+    camera.yOffset = 4.0f;
     glfwSwapInterval(1);
     double lastTime = glfwGetTime();
 
@@ -234,6 +340,7 @@ int main()
         float dt = float(std::min(now - lastTime, 0.05));
         lastTime = now;
         robot.update(dt);
+        world.update(dt, robot);
 
         glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -275,6 +382,41 @@ int main()
             glUniformMatrix4fv(glGetUniformLocation(prog, "model"), 1, GL_FALSE, &model[0][0]);
             parts[i].mesh->draw();
         }
+
+        // --- pola odkładcze i litery ---
+        glUniform1i(glGetUniformLocation(prog, "solid"), 1);
+        glBindVertexArray(marks.vao);
+        for (size_t i = 0; i < world.slots.size(); ++i)
+        {
+            const Slot &sl = world.slots[i];
+            glm::mat4 m = glm::rotate(glm::translate(glm::mat4(1.0f), sl.pos + glm::vec3(0, 0.01f, 0)), sl.yaw, glm::vec3(0, 1, 0));
+            glm::mat4 mvp = proj * view * m;
+            glUniform3f(glGetUniformLocation(prog, "color"), 0.95f, 0.95f, 0.95f);
+            glUniformMatrix4fv(glGetUniformLocation(prog, "mvp"), 1, GL_FALSE, &mvp[0][0]);
+            glUniformMatrix4fv(glGetUniformLocation(prog, "model"), 1, GL_FALSE, &m[0][0]);
+            glDrawArrays(GL_TRIANGLES, marks.outline.first, marks.outline.count);
+            glm::vec3 radial = glm::normalize(glm::vec3(sl.pos.x, 0, sl.pos.z));
+            m = glm::translate(glm::mat4(1.0f), sl.pos + radial * 1.4f + glm::vec3(0, 0.01f, 0));
+            mvp = proj * view * m;
+            glUniformMatrix4fv(glGetUniformLocation(prog, "mvp"), 1, GL_FALSE, &mvp[0][0]);
+            glUniformMatrix4fv(glGetUniformLocation(prog, "model"), 1, GL_FALSE, &m[0][0]);
+            const auto &r = marks.letters[i % marks.letters.size()];
+            glDrawArrays(GL_TRIANGLES, r.first, r.count);
+        }
+
+        // --- klocki ---
+        for (size_t i = 0; i < world.blocks.size(); ++i)
+        {
+            glm::mat4 model = world.blockMatrix(int(i), robot) * cubeLocal;
+            glm::mat4 mvp = proj * view * model;
+            const glm::vec3 &c = world.blocks[i].color;
+            glUniform3f(glGetUniformLocation(prog, "color"), c.r, c.g, c.b);
+            glUniformMatrix4fv(glGetUniformLocation(prog, "mvp"), 1, GL_FALSE, &mvp[0][0]);
+            glUniformMatrix4fv(glGetUniformLocation(prog, "model"), 1, GL_FALSE, &model[0][0]);
+            glBindVertexArray(cubeVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 36);
+        }
+        glUniform1i(glGetUniformLocation(prog, "solid"), 0);
 
         glfwSwapBuffers(win);
         glfwPollEvents();
